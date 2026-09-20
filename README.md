@@ -141,7 +141,7 @@ X-Ray currently supports npm dependency analysis. projects from other ecosystems
 ## INSTALL ON WINDOWS
 
 1. open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest);
-2. download `EDI Developer Journal_*_x64-setup.exe`;
+2. download `EDI_Developer_Journal_0.1.0_x64-setup.exe`;
 3. run the installer;
 4. open `EDI Developer Journal` from the Start menu
 
