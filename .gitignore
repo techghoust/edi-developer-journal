@@ -1,0 +1,37 @@
+# dependencies
+node_modules/
+.npm-cache/
+.node-gyp/
+src-tauri/target/
+src-tauri/target-current/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# local databases / runtime data
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.project-memory/
+
+# env
+.env
+.env.local
+.env.*
+!.env.example
+
+# editor/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# logs
+npm-debug.log*
+*.log

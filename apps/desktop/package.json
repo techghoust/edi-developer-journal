@@ -1,0 +1,8 @@
+{
+  "name": "@edi-developer-journal/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"require('node:fs').cpSync('src/renderer','dist/renderer',{recursive:true})\""
+  }
+}

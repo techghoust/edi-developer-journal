@@ -1,0 +1,31 @@
+{
+  "name": "edi-developer-journal",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "test": "npm run rebuild:node && node node_modules/vitest/vitest.mjs run",
+    "test:watch": "npm run rebuild:node && node node_modules/vitest/vitest.mjs",
+    "build:core": "npm run build -w packages/core",
+    "build:frontend": "npm run build -w apps/desktop",
+    "build": "npm run build:core && npm run build:frontend",
+    "rebuild:node": "npm rebuild better-sqlite3",
+    "typecheck": "node node_modules/typescript/bin/tsc -p packages/core/tsconfig.json --noEmit --pretty",
+    "tauri": "tauri",
+    "start": "tauri dev",
+    "start:tauri": "tauri dev",
+    "build:tauri": "tauri build",
+    "release:windows": "tauri build --bundles nsis"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
+    "typescript": "^5.5.4",
+    "vitest": "^4.1.10"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1"
+  }
+}
