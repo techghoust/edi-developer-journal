@@ -18,7 +18,8 @@
     "start": "tauri dev",
     "start:tauri": "tauri dev",
     "build:tauri": "tauri build",
-    "release:windows": "tauri build --bundles nsis"
+    "release:windows": "tauri build --bundles nsis",
+    "release:linux": "tauri build --bundles deb,appimage"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
