@@ -8,7 +8,7 @@ current version: `0.1.0`
 
 ---
 
-# THE PROBLEM
+# THE PROBLEM?
 
 Git remembers what changed, but it does not remember why it changed. after a break you can recover the code and still forget which alternatives were rejected, which assumptions were wrong, what an experiment proved or what should happen next. EDI Developer Journal keeps that missing context next to the project without changing the repository
 
