@@ -1,4 +1,4 @@
-# EDI DEVELOPER JOURNAL
+# EDI DEVELOPER JOURNAL🐙
 
 local-first desktop journal that stores the reasoning behind software projects: decisions, experiments, research, assumptions, failures and the context needed to continue the work later
 
