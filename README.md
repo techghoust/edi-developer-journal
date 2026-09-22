@@ -2,7 +2,7 @@
 
 local-first desktop journal that stores the reasoning behind software projects: decisions, experiments, research, assumptions, failures and the context needed to continue the work later
 
-current version: `0.1.1`
+current version: `0.2.0`
 
 ![EDI Developer Journal workspace](assets/edi-preview.jpg)
 

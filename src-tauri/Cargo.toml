@@ -1,6 +1,6 @@
 [package]
 name = "edi-developer-journal"
-version = "0.1.1"
+version = "0.2.0"
 description = "Local-first project context and decision memory"
 authors = ["EDI Developer Journal"]
 edition = "2021"
