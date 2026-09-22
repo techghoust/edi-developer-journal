@@ -82,7 +82,26 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create "${{ github.ref_name }}" release-assets/* \
-            --repo "${{ github.repository }}" \
-            --generate-notes \
-            --title "EDI Developer Journal ${{ github.ref_name }}"
+          mapfile -d '' assets < <(find release-assets -type f -print0)
+          if [ "${#assets[@]}" -ne 3 ]; then
+            echo "Expected three release files, found ${#assets[@]}"
+            printf '%s\n' "${assets[@]}"
+            exit 1
+          fi
+
+          if gh release view "${{ github.ref_name }}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload "${{ github.ref_name }}" "${assets[@]}" \
+              --repo "${{ github.repository }}" \
+              --clobber
+            gh release edit "${{ github.ref_name }}" \
+              --repo "${{ github.repository }}" \
+              --draft=false \
+              --latest \
+              --title "EDI Developer Journal ${{ github.ref_name }}"
+          else
+            gh release create "${{ github.ref_name }}" "${assets[@]}" \
+              --repo "${{ github.repository }}" \
+              --generate-notes \
+              --latest \
+              --title "EDI Developer Journal ${{ github.ref_name }}"
+          fi
