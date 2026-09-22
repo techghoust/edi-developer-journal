@@ -2,7 +2,7 @@
 
 local-first desktop journal that stores the reasoning behind software projects: decisions, experiments, research, assumptions, failures and the context needed to continue the work later
 
-current version: `0.1.0`
+current version: `0.1.1`
 
 ![EDI Developer Journal workspace](assets/edi-preview.jpg)
 
@@ -141,7 +141,7 @@ X-Ray currently supports npm dependency analysis. projects from other ecosystems
 ## INSTALL ON WINDOWS
 
 1. open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest);
-2. download `EDI_Developer_Journal_0.1.0_x64-setup.exe`;
+2. download the file ending in `_x64-setup.exe`;
 3. run the installer;
 4. open `EDI Developer Journal` from the Start menu
 
@@ -150,6 +150,22 @@ the installer contains the application. Node.js, Rust and the source code are no
 the current release is unsigned, so Windows SmartScreen may show a warning. download releases only from this repository
 
 on first launch the project list is empty. EDI does not include example projects, developer data or another user's journal
+
+---
+
+## INSTALL ON LINUX
+
+open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest) and choose one package:
+
+- `.AppImage` runs without installation. make it executable and open it;
+- `.deb` installs on Debian, Ubuntu and compatible distributions
+
+```bash
+chmod +x EDI*.AppImage
+./EDI*.AppImage
+```
+
+the Linux build targets x86_64 systems and requires WebKitGTK 4.1. Git must be available for repository integration
 
 ---
 
@@ -297,11 +313,11 @@ TypeScript tests are built with Vitest. the native application uses Rust unit te
 
 ## CURRENT LIMITATIONS
 
-- Windows is the current desktop target;
+- Windows and x86_64 Linux are the current desktop targets;
 - X-Ray analyzes npm projects only;
 - JSON exports do not contain local media files;
 - imported memory is merged into an existing project;
-- development builds are not code-signed
+- release binaries are not code-signed
 
 ---
 

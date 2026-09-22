@@ -23,12 +23,66 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
-      - run: npx tauri build --bundles nsis
-      - name: publish installer
-        shell: pwsh
+      - run: npm run release:windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
+  linux-packages:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xvfb
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run release:linux
+      - name: smoke test Linux desktop
+        shell: bash
+        run: |
+          set +e
+          timeout 15s xvfb-run -a "src-tauri/target/release/EDI Developer Journal"
+          status=$?
+          set -e
+          if [ "$status" -ne 124 ]; then
+            echo "Linux desktop process exited unexpectedly with status $status"
+            exit "$status"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    needs:
+      - windows-installer
+      - linux-packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
-          if (-not $installer) { throw "Windows installer was not created." }
-          gh release create "${{ github.ref_name }}" $installer.FullName --generate-notes --title "EDI Developer Journal ${{ github.ref_name }}"
+          gh release create "${{ github.ref_name }}" release-assets/* \
+            --repo "${{ github.repository }}" \
+            --generate-notes \
+            --title "EDI Developer Journal ${{ github.ref_name }}"

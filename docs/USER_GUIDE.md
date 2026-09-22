@@ -1,6 +1,6 @@
 # EDI DEVELOPER JOURNAL: USER GUIDE
 
-this guide explains the current behavior of version `0.1.0`
+this guide explains the current behavior of version `0.1.1`
 
 ---
 
