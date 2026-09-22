@@ -4,6 +4,40 @@ this guide explains the current behavior of version `0.2.0`
 
 ---
 
+## INSTALLATION
+
+download the packages from the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest)
+
+### Windows
+
+download the file ending in `_x64-setup.exe`, run it and open `EDI Developer Journal` from the Start menu
+
+### Linux
+
+the Linux release targets x86_64 systems and provides two packages:
+
+- `.AppImage` runs without installation;
+- `.deb` installs on Debian, Ubuntu and compatible distributions
+
+to run the AppImage:
+
+```bash
+chmod +x EDI*.AppImage
+./EDI*.AppImage
+```
+
+to install the Debian package from its download directory:
+
+```bash
+sudo apt install ./EDI*.deb
+```
+
+the Linux application requires WebKitGTK 4.1. Git must be installed for repository integration
+
+on first launch the project list is empty. release packages do not include example projects or another user's journal data
+
+---
+
 ## ADD A PROJECT
 
 open the application and use `New Project`
@@ -225,13 +259,21 @@ removes the project and its journal memory from EDI. repository files remain on 
 
 ## COMPLETE BACKUP
 
-close EDI and copy:
+close EDI and copy the application data directory for the current system
+
+Windows:
 
 ```text
 %APPDATA%\EDI Developer Journal
 ```
 
-this directory contains the SQLite database and managed attachments
+Linux:
+
+```text
+~/.config/EDI Developer Journal
+```
+
+the directory contains the SQLite database and managed attachments
 
 keep the backup private when the journal contains sensitive project information
 
