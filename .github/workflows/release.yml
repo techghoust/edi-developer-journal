@@ -24,10 +24,17 @@ jobs:
       - run: npm run build
       - run: cargo test --manifest-path src-tauri/Cargo.toml
       - run: npm run release:windows
+      - name: prepare portable application
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item "src-tauri/target/release/EDI Developer Journal.exe" "release-assets/EDI-Developer-Journal_${env:GITHUB_REF_NAME}_windows-portable.exe"
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: src-tauri/target/release/bundle/nsis/*-setup.exe
+          name: windows-packages
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            release-assets/*-windows-portable.exe
           if-no-files-found: error
 
   linux-packages:
@@ -83,8 +90,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -d '' assets < <(find release-assets -type f -print0)
-          if [ "${#assets[@]}" -ne 3 ]; then
-            echo "Expected three release files, found ${#assets[@]}"
+          if [ "${#assets[@]}" -ne 4 ]; then
+            echo "Expected four release files, found ${#assets[@]}"
             printf '%s\n' "${assets[@]}"
             exit 1
           fi

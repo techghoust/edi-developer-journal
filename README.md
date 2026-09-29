@@ -2,7 +2,7 @@
 
 local-first desktop journal that stores the reasoning behind software projects: decisions, experiments, research, assumptions, failures and the context needed to continue the work later
 
-current version: `0.2.0`
+current version: `0.3.0`
 
 ![EDI Developer Journal workspace](assets/edi-preview.jpg)
 
@@ -120,6 +120,24 @@ when a registered Git repository is moved, EDI searches for a unique repository 
 
 ---
 
+## VS CODE COMPANION
+
+EDI Developer Journal Companion connects a local VS Code workspace to EDI through Integration Protocol v1
+
+it can:
+
+- open the current workspace in EDI;
+- create a note, decision, experiment or research item from VS Code;
+- attach the current file, language, selected range, branch and commit;
+- include only text selected by the user;
+- prevent duplicate records when the same request is retried
+
+the companion communicates only through `127.0.0.1`. it does not access the EDI database directly, scan the repository or send data to a cloud service
+
+see the companion repository for its VSIX and installation guide: [techghoust/edi-vscode](https://github.com/techghoust/edi-vscode)
+
+---
+
 ## X-RAY
 
 X-Ray reads `package.json` and, when available, `package-lock.json`
@@ -141,9 +159,13 @@ X-Ray currently supports npm dependency analysis. projects from other ecosystems
 ## INSTALL ON WINDOWS
 
 1. open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest);
-2. download the file ending in `_x64-setup.exe`;
-3. run the installer;
-4. open `EDI Developer Journal` from the Start menu
+2. choose one Windows build;
+3. run the application
+
+available builds:
+
+- `_x64-setup.exe` installs EDI and adds it to the Start menu;
+- `_windows-portable.exe` runs without installation
 
 the installer contains the application. Node.js, Rust and the source code are not required to use it
 

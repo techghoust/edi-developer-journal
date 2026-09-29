@@ -1,15 +1,17 @@
 use chrono::{NaiveDateTime, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
-use std::{fs, path::{Path, PathBuf}, process::Command, sync::Mutex};
+use std::{fs, path::{Path, PathBuf}, process::Command, sync::{Arc, Mutex}};
 use tauri::{Manager, State};
 use uuid::Uuid;
 
+mod integration;
 mod xray;
 
 struct AppState {
-    db: Mutex<Option<Connection>>,
+    db: Arc<Mutex<Option<Connection>>>,
     db_error: Option<String>,
+    integration_pending: Arc<Mutex<Option<Value>>>,
 }
 
 fn text(input: &Value, key: &str) -> String {
@@ -236,7 +238,70 @@ fn set_assumption_relations(db: &Connection, prefix: &str, id: &str, input: &Val
     Ok(())
 }
 
+
+fn integration_path_key(value: &str) -> String {
+    let resolved = fs::canonicalize(value).unwrap_or_else(|_| PathBuf::from(value));
+    let text = resolved.to_string_lossy().replace('\\', "/");
+    #[cfg(target_os = "windows")]
+    { return text.trim_start_matches("//?/").to_lowercase(); }
+    #[cfg(not(target_os = "windows"))]
+    { text }
+}
+
+fn integration_paths_match(left: &str, right: &str) -> bool {
+    integration_path_key(left) == integration_path_key(right)
+}
+
+pub(crate) fn resolve_integration_project(db: &Connection, reference: &integration::ProjectRef) -> Result<Option<Value>, String> {
+    let mut candidates = Vec::new();
+    if let Some(repository) = reference.repository_path.as_deref().filter(|value| !value.trim().is_empty()) {
+        candidates.push(repository.to_string());
+    }
+    if !reference.workspace_path.trim().is_empty() && !candidates.iter().any(|value| integration_paths_match(value, &reference.workspace_path)) {
+        candidates.push(reference.workspace_path.clone());
+    }
+
+    let mut statement = db.prepare("SELECT id,name,path,last_head_hash,git_remote FROM projects ORDER BY created_at DESC,rowid DESC").map_err(|error| error.to_string())?;
+    let rows = statement.query_map([], |row| Ok((
+        row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?,
+        row.get::<_, Option<String>>(3)?, row.get::<_, Option<String>>(4)?,
+    ))).map_err(|error| error.to_string())?;
+    let projects = rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())?;
+
+    for (id, _, stored_path, _, _) in &projects {
+        if candidates.iter().any(|candidate| integration_paths_match(candidate, stored_path)) {
+            return project(db, id);
+        }
+    }
+
+    let Some(target) = candidates.iter().find(|candidate| Path::new(candidate).is_dir()) else { return Ok(None); };
+    let target_path = Path::new(target);
+    let target_remote = reference.remote_url.clone().or_else(|| run_git(target_path, &["remote", "get-url", "origin"]));
+    let target_head = reference.head_commit.clone().or_else(|| run_git(target_path, &["rev-parse", "HEAD"]));
+    let target_name = target_path.file_name().and_then(|value| value.to_str()).map(normalized_name).unwrap_or_default();
+    let mut matches = Vec::new();
+    for (id, name, stored_path, stored_head, stored_remote) in projects {
+        if Path::new(&stored_path).is_dir() { continue; }
+        let Some(stored_head) = stored_head.filter(|value| !value.is_empty()) else { continue; };
+        if !repository_contains_commit(target_path, &stored_head) { continue; }
+        let remote_matches = stored_remote.as_deref().zip(target_remote.as_deref()).is_some_and(|(left, right)| left == right);
+        let exact_head_and_name = target_head.as_deref() == Some(stored_head.as_str())
+            && [normalized_name(&name), Path::new(&stored_path).file_name().and_then(|value| value.to_str()).map(normalized_name).unwrap_or_default()].contains(&target_name);
+        if !remote_matches && !exact_head_and_name { continue; }
+        let score = (if remote_matches { 8 } else { 0 }) + (if exact_head_and_name { 6 } else { 0 });
+        matches.push((score, id));
+    }
+    matches.sort_by(|left, right| right.0.cmp(&left.0));
+    let Some((best_score, id)) = matches.first() else { return Ok(None); };
+    if matches.get(1).is_some_and(|next| next.0 == *best_score) { return Ok(None); }
+    let owner: Option<String> = db.query_row("SELECT id FROM projects WHERE path=?1 AND id<>?2", params![target, id], |row| row.get(0)).optional().map_err(|error| error.to_string())?;
+    if owner.is_some() { return Ok(None); }
+    execute(db, "UPDATE projects SET path=?1 WHERE id=?2", &[target, id])?;
+    refresh_git(db, id, target_path)?;
+    project(db, id)
+}
 #[tauri::command] fn get_app_status(state: State<AppState>) -> Value { json!({"dbReady":state.db.lock().map(|v|v.is_some()).unwrap_or(false),"dbError":state.db_error}) }
+#[tauri::command] fn take_integration_request(state: State<AppState>) -> Option<Value> { state.integration_pending.lock().ok()?.take() }
 
 #[tauri::command] fn list_projects(state: State<AppState>) -> Result<Vec<Value>,String> { with_db(&state, |db| {
     let mut statement=db.prepare("SELECT id FROM projects ORDER BY created_at DESC,rowid DESC").map_err(|e|e.to_string())?;
@@ -555,8 +620,56 @@ fn import_project_data(state: State<AppState>, project_id: String) -> Result<Opt
     project(db,&id)?.ok_or("Project not found.".into())
 }) }
 
+pub(crate) fn create_entry_record(db: &Connection, input: &Value) -> Result<Value, String> {
+    let title = text(input, "title");
+    if title.is_empty() { return Err("Entry title is required.".into()); }
+    let id = Uuid::new_v4().to_string();
+    let project_id = text(input, "projectId");
+    execute(db, "INSERT INTO entries(id,project_id,title,body_md,source) VALUES(?1,?2,?3,?4,'manual')", &[&id,&project_id,&title,&text(input,"bodyMd")])?;
+    set_entry_relations(db, &id, &project_id, input)?;
+    entry(db, &id)?.ok_or("Entry not found.".into())
+}
+
+pub(crate) fn create_decision_record(db: &Connection, input: &Value) -> Result<Value, String> {
+    let title = text(input, "title");
+    if title.is_empty() { return Err("Decision title is required.".into()); }
+    let id = Uuid::new_v4().to_string();
+    let project_id = text(input, "projectId");
+    let status = optional_text(input, "status").unwrap_or_else(|| "active".into());
+    let temporary = input.get("temporary").and_then(Value::as_bool).unwrap_or(false);
+    let review_status = optional_text(input, "reviewStatus").unwrap_or_else(|| "pending".into());
+    execute(db, "INSERT INTO decisions(id,project_id,title,status,reason,notes,parent_decision_id,replacement_decision_id,checkpoint_id,temporary,revisit_condition,revisit_date,review_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", &[&id,&project_id,&title,&status,&text(input,"reason"),&text(input,"notes"),&optional_text(input,"parentDecisionId"),&optional_text(input,"replacementDecisionId"),&optional_text(input,"checkpointId"),&temporary,&text(input,"revisitCondition"),&optional_text(input,"revisitDate"),&review_status])?;
+    set_memory_relations(db, "decision", &id, &project_id, input)?;
+    set_assumption_relations(db, "decision", &id, input)?;
+    decision(db, &id)?.ok_or("Decision not found.".into())
+}
+
+pub(crate) fn create_experiment_record(db: &Connection, input: &Value) -> Result<Value, String> {
+    let title = text(input, "title");
+    if title.is_empty() { return Err("Experiment title is required.".into()); }
+    let id = Uuid::new_v4().to_string();
+    let project_id = text(input, "projectId");
+    let status = optional_text(input, "status").unwrap_or_else(|| "planned".into());
+    let experiment_date = optional_text(input, "experimentDate").unwrap_or_else(|| Utc::now().date_naive().to_string());
+    execute(db, "INSERT INTO experiments(id,project_id,title,hypothesis,tested,method,result,conclusion,status,experiment_date,resulting_decision_id,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", &[&id,&project_id,&title,&text(input,"hypothesis"),&text(input,"tested"),&text(input,"method"),&text(input,"result"),&text(input,"conclusion"),&status,&experiment_date,&optional_text(input,"resultingDecisionId"),&text(input,"notes")])?;
+    set_memory_relations(db, "experiment", &id, &project_id, input)?;
+    set_assumption_relations(db, "experiment", &id, input)?;
+    experiment(db, &id)?.ok_or("Experiment not found.".into())
+}
+
+pub(crate) fn create_research_record(db: &Connection, input: &Value) -> Result<Value, String> {
+    let title = text(input, "title");
+    if title.is_empty() { return Err("Research title is required.".into()); }
+    let id = Uuid::new_v4().to_string();
+    let project_id = text(input, "projectId");
+    execute(db, "INSERT INTO research_items(id,project_id,type,title,path_or_url,notes) VALUES(?1,?2,?3,?4,?5,?6)", &[&id,&project_id,&text(input,"type"),&title,&optional_text(input,"pathOrUrl"),&text(input,"notes")])?;
+    for entry_id in strings(input, "entryIds") {
+        execute(db, "INSERT OR IGNORE INTO research_links(research_id,entry_id) VALUES(?1,?2)", &[&id, &entry_id])?;
+    }
+    research(db, &id)?.ok_or("Research item not found.".into())
+}
 #[tauri::command] fn list_entries(state:State<AppState>,project_id:String)->Result<Vec<Value>,String>{with_db(&state,|db|{let ids=query_ids(db,"SELECT id FROM entries WHERE project_id=?1 ORDER BY created_at DESC",&project_id)?;ids.iter().map(|id|entry(db,id).map(|v|v.unwrap())).collect()})}
-#[tauri::command] fn create_entry(state:State<AppState>,input:Value)->Result<Value,String>{with_db(&state,|db|{let id=Uuid::new_v4().to_string();let pid=text(&input,"projectId");execute(db,"INSERT INTO entries(id,project_id,title,body_md,source) VALUES(?1,?2,?3,?4,'manual')",&[&id,&pid,&text(&input,"title"),&text(&input,"bodyMd")])?;set_entry_relations(db,&id,&pid,&input)?;entry(db,&id)?.ok_or("Entry not found.".into())})}
+#[tauri::command] fn create_entry(state:State<AppState>,input:Value)->Result<Value,String>{with_db(&state,|db|create_entry_record(db,&input))}
 #[tauri::command] fn update_entry(state:State<AppState>,input:Value)->Result<Value,String>{with_db(&state,|db|{let id=text(&input,"id");let old=entry(db,&id)?.ok_or("Entry not found.")?;let pid=old["projectId"].as_str().unwrap();execute(db,"UPDATE entries SET title=?1,body_md=?2,updated_at=datetime('now') WHERE id=?3",&[&text(&input,"title"),&text(&input,"bodyMd"),&id])?;set_entry_relations(db,&id,pid,&input)?;entry(db,&id)?.ok_or("Entry not found.".into())})}
 #[tauri::command] fn delete_entry(state:State<AppState>,entry_id:String)->Result<(),String>{with_db(&state,|db|execute(db,"DELETE FROM entries WHERE id=?1",&[&entry_id]))}
 
@@ -567,17 +680,7 @@ fn import_project_data(state: State<AppState>, project_id: String) -> Result<Opt
 #[tauri::command] fn list_decisions(state:State<AppState>,project_id:String)->Result<Vec<Value>,String>{with_db(&state,|db|{let ids=query_ids(db,"SELECT id FROM decisions WHERE project_id=?1 ORDER BY created_at ASC,rowid ASC",&project_id)?;ids.iter().map(|id|decision(db,id).map(|v|v.unwrap())).collect()})}
 #[tauri::command]
 fn create_decision(state: State<AppState>, input: Value) -> Result<Value, String> {
-    with_db(&state, |db| {
-        let id = Uuid::new_v4().to_string();
-        let project_id = text(&input, "projectId");
-        let status = optional_text(&input, "status").unwrap_or_else(|| "active".into());
-        let temporary = input.get("temporary").and_then(Value::as_bool).unwrap_or(false);
-        let review_status = optional_text(&input, "reviewStatus").unwrap_or_else(|| "pending".into());
-        execute(db, "INSERT INTO decisions(id,project_id,title,status,reason,notes,parent_decision_id,replacement_decision_id,checkpoint_id,temporary,revisit_condition,revisit_date,review_status) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)", &[&id,&project_id,&text(&input,"title"),&status,&text(&input,"reason"),&text(&input,"notes"),&optional_text(&input,"parentDecisionId"),&optional_text(&input,"replacementDecisionId"),&optional_text(&input,"checkpointId"),&temporary,&text(&input,"revisitCondition"),&optional_text(&input,"revisitDate"),&review_status])?;
-        set_memory_relations(db, "decision", &id, &project_id, &input)?;
-        set_assumption_relations(db, "decision", &id, &input)?;
-        decision(db, &id)?.ok_or("Decision not found.".into())
-    })
+    with_db(&state, |db| create_decision_record(db, &input))
 }
 
 #[tauri::command]
@@ -640,18 +743,7 @@ fn list_experiments(state: State<AppState>, project_id: String) -> Result<Vec<Va
 
 #[tauri::command]
 fn create_experiment(state: State<AppState>, input: Value) -> Result<Value, String> {
-    with_db(&state, |db| {
-        let title = text(&input, "title");
-        if title.is_empty() { return Err("Experiment title is required.".into()); }
-        let id = Uuid::new_v4().to_string();
-        let project_id = text(&input, "projectId");
-        let status = optional_text(&input, "status").unwrap_or_else(|| "planned".into());
-        let experiment_date = optional_text(&input, "experimentDate").unwrap_or_else(|| Utc::now().date_naive().to_string());
-        execute(db, "INSERT INTO experiments(id,project_id,title,hypothesis,tested,method,result,conclusion,status,experiment_date,resulting_decision_id,notes) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)", &[&id,&project_id,&title,&text(&input,"hypothesis"),&text(&input,"tested"),&text(&input,"method"),&text(&input,"result"),&text(&input,"conclusion"),&status,&experiment_date,&optional_text(&input,"resultingDecisionId"),&text(&input,"notes")])?;
-        set_memory_relations(db, "experiment", &id, &project_id, &input)?;
-        set_assumption_relations(db, "experiment", &id, &input)?;
-        experiment(db, &id)?.ok_or("Experiment not found.".into())
-    })
+    with_db(&state, |db| create_experiment_record(db, &input))
 }
 
 #[tauri::command]
@@ -711,17 +803,11 @@ fn get_why_context(state: State<AppState>, project_id: String, kind: String, mem
 
 #[tauri::command] fn list_research(state:State<AppState>,project_id:String)->Result<Vec<Value>,String>{with_db(&state,|db|{let ids=query_ids(db,"SELECT id FROM research_items WHERE project_id=?1 ORDER BY created_at DESC,rowid DESC",&project_id)?;ids.iter().map(|id|research(db,id).map(|v|v.unwrap())).collect()})}
 #[tauri::command]
-fn create_research_item(state: State<AppState>, input: Value) -> Result<Value, String> {
+fn create_research_item(state: State<AppState>, mut input: Value) -> Result<Value, String> {
     let project_id = text(&input, "projectId");
     let location = persist_media_location(&project_id, optional_text(&input, "pathOrUrl"))?;
-    with_db(&state, |db| {
-        let id = Uuid::new_v4().to_string();
-        execute(db, "INSERT INTO research_items(id,project_id,type,title,path_or_url,notes) VALUES(?1,?2,?3,?4,?5,?6)", &[&id, &project_id, &text(&input,"type"), &text(&input,"title"), &location, &text(&input,"notes")])?;
-        for entry_id in strings(&input, "entryIds") {
-            execute(db, "INSERT OR IGNORE INTO research_links(research_id,entry_id) VALUES(?1,?2)", &[&id, &entry_id])?;
-        }
-        research(db, &id)?.ok_or("Research item not found.".into())
-    })
+    input["pathOrUrl"] = location.map(Value::String).unwrap_or(Value::Null);
+    with_db(&state, |db| create_research_record(db, &input))
 }
 
 #[tauri::command]
@@ -882,6 +968,7 @@ fn open_database() -> Result<Connection, String> {
         ("004_project_memory.sql", include_str!("../../packages/core/src/db/migrations/004_project_memory.sql")),
         ("005_project_xray.sql", include_str!("../../packages/core/src/db/migrations/005_project_xray.sql")),
         ("006_engineering_memory.sql", include_str!("../../packages/core/src/db/migrations/006_engineering_memory.sql")),
+        ("007_editor_integration.sql", include_str!("../../packages/core/src/db/migrations/007_editor_integration.sql")),
     ] {
         let exists: i64 = db.query_row("SELECT COUNT(*) FROM _migrations WHERE name=?1", [name], |row| row.get(0)).map_err(|error| error.to_string())?;
         if exists > 0 { continue; }
@@ -959,6 +1046,7 @@ mod import_tests {
             include_str!("../../packages/core/src/db/migrations/004_project_memory.sql"),
             include_str!("../../packages/core/src/db/migrations/005_project_xray.sql"),
             include_str!("../../packages/core/src/db/migrations/006_engineering_memory.sql"),
+            include_str!("../../packages/core/src/db/migrations/007_editor_integration.sql"),
         ] { db.execute_batch(sql).unwrap(); }
         db.execute("INSERT INTO projects(id,name,path) VALUES('target','Target','C:/target')", []).unwrap();
         db
@@ -990,4 +1078,29 @@ mod import_tests {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
-pub fn run(){let result=open_database();let (db,db_error)=match result{Ok(db)=>(Some(db),None),Err(e)=>(None,Some(e))};tauri::Builder::default().manage(AppState{db:Mutex::new(db),db_error}).setup(|app|{if let Some(window)=app.get_webview_window("main"){let icon=tauri::image::Image::new(include_bytes!("../icons/128x128.rgba"),128,128);window.set_icon(icon)?;}Ok(())}).invoke_handler(tauri::generate_handler![get_app_status,list_projects,auto_relocate_projects,get_project,update_project_name,delete_project,create_project,open_project_path,relocate_project,choose_project_path,choose_media_file,open_media_location,get_data_directory,export_project_data,import_project_data,list_entries,create_entry,update_entry,delete_entry,list_checkpoints,create_checkpoint,delete_checkpoint,list_decisions,create_decision,update_decision,delete_decision,list_assumptions,create_assumption,update_assumption,list_experiments,create_experiment,update_experiment,delete_experiment,get_edi_insights,get_why_context,get_resume_context,list_memory_timeline,list_research,create_research_item,delete_research_item,refresh_git_metadata,get_commits,analyze_project_xray,simulate_xray_removal,set_xray_memory_links]).run(tauri::generate_context!()).expect("error while running EDI Developer Journal");}
+pub fn run() {
+    let result = open_database();
+    let (db, db_error) = match result { Ok(db) => (Some(db), None), Err(error) => (None, Some(error)) };
+    let database = Arc::new(Mutex::new(db));
+    let integration_pending = Arc::new(Mutex::new(None));
+    let integration_database = Arc::clone(&database);
+    let integration_queue = Arc::clone(&integration_pending);
+    let integration_database_error = db_error.clone();
+
+    tauri::Builder::default()
+        .manage(AppState { db: database, db_error, integration_pending })
+        .setup(move |app| {
+            if let Some(window) = app.get_webview_window("main") {
+                let icon = tauri::image::Image::new(include_bytes!("../icons/128x128.rgba"), 128, 128);
+                window.set_icon(icon)?;
+            }
+            match integration::start(app.handle().clone(), Arc::clone(&integration_database), integration_database_error.clone(), Arc::clone(&integration_queue)) {
+                Ok(runtime) => { app.manage(runtime); }
+                Err(error) => eprintln!("EDI local integration unavailable: {error}"),
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![get_app_status,take_integration_request,list_projects,auto_relocate_projects,get_project,update_project_name,delete_project,create_project,open_project_path,relocate_project,choose_project_path,choose_media_file,open_media_location,get_data_directory,export_project_data,import_project_data,list_entries,create_entry,update_entry,delete_entry,list_checkpoints,create_checkpoint,delete_checkpoint,list_decisions,create_decision,update_decision,delete_decision,list_assumptions,create_assumption,update_assumption,list_experiments,create_experiment,update_experiment,delete_experiment,get_edi_insights,get_why_context,get_resume_context,list_memory_timeline,list_research,create_research_item,delete_research_item,refresh_git_metadata,get_commits,analyze_project_xray,simulate_xray_removal,set_xray_memory_links])
+        .run(tauri::generate_context!())
+        .expect("error while running EDI Developer Journal");
+}

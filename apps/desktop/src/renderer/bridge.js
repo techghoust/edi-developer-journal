@@ -2,6 +2,7 @@
   if (window.journal) return;
 
   const invoke = window.__TAURI__?.core?.invoke;
+  const listen = window.__TAURI__?.event?.listen;
   const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
   if (!invoke) {
     throw new Error('EDI Developer Journal native bridge is unavailable.');
@@ -58,5 +59,7 @@
     simulateXrayRemoval: (projectId, dependencyId) => invoke('simulate_xray_removal', { projectId, dependencyId }),
     setXrayMemoryLinks: (input) => invoke('set_xray_memory_links', { input }),
     getAppStatus: () => invoke('get_app_status'),
+    takeIntegrationRequest: () => invoke('take_integration_request'),
+    onIntegrationRequest: (handler) => listen('edi-integration-request', () => handler()),
   };
 })();

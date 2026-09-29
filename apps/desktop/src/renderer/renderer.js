@@ -2099,4 +2099,38 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-buildProjectsWindow();
+const projectsWindow = buildProjectsWindow();
+
+async function handleIntegrationProjectOpen(request) {
+  if (!request) return;
+  if (request.project) {
+    await openProjectWindow(request.project);
+    return;
+  }
+
+  projectsWindow.show();
+  await renderProjectsContent(projectsWindow);
+  const nameInput = projectsWindow.bodyEl.querySelector('#new-project-name');
+  const pathInput = projectsWindow.bodyEl.querySelector('#new-project-path');
+  const allowNonGit = projectsWindow.bodyEl.querySelector('#allow-non-git');
+  const status = projectsWindow.bodyEl.querySelector('.project-form .dj-status');
+  const projectPath = request.repositoryPath || request.workspacePath || '';
+  if (nameInput) nameInput.value = request.suggestedName || '';
+  if (pathInput) pathInput.value = projectPath;
+  if (allowNonGit) allowNonGit.checked = !request.repositoryPath;
+  if (status) {
+    status.style.color = '#f0b75a';
+    status.textContent = 'this workspace is not linked yet. create the project or open the existing folder.';
+  }
+  pathInput?.focus();
+}
+
+async function drainIntegrationRequest() {
+  try {
+    await handleIntegrationProjectOpen(await window.journal.takeIntegrationRequest());
+  } catch (error) {
+    console.error('failed to handle EDI integration request', error);
+  }
+}
+
+window.journal.onIntegrationRequest(drainIntegrationRequest).then(drainIntegrationRequest);
