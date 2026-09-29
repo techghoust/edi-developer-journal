@@ -165,7 +165,7 @@ X-Ray currently supports npm dependency analysis. projects from other ecosystems
 available builds:
 
 - `_x64-setup.exe` installs EDI and adds it to the Start menu;
-- `_windows-portable.exe` runs without installation
+- `_x64-portable.exe` runs without installation
 
 the installer contains the application. Node.js, Rust and the source code are not required to use it
 
