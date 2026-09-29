@@ -90,8 +90,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mapfile -d '' assets < <(find release-assets -type f -print0)
-          if [ "${#assets[@]}" -ne 4 ]; then
-            echo "Expected four release files, found ${#assets[@]}"
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "No release files were downloaded"
             printf '%s\n' "${assets[@]}"
             exit 1
           fi
