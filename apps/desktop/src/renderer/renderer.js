@@ -233,7 +233,6 @@ async function renderProjectSettingsContent(settingsWin, projectsWin, selectedId
     <section class="settings-section settings-danger-zone">
       <div class="settings-heading">[ DELETE PROJECT ]</div>
       <select class="delete-project-select" aria-label="project to delete"></select>
-      <div class="dim">removes journal memory; repository files stay on disk.</div>
       <button class="button-danger delete-project-button" type="button">delete selected project</button>
     </section>
     <div class="dj-status"></div>
@@ -1617,13 +1616,154 @@ async function openProjectWindow(project) {
   }
 }
 
-async function renderProjectWindowContent(win, project) {
+function createProjectEntryRow(entry, project, win, lineNumber) {
+  const entryRow = document.createElement('div');
+  entryRow.className = 'txt-line accent entry-line';
+
+  const lineNum = document.createElement('span');
+  lineNum.className = 'ln';
+  lineNum.textContent = String(lineNumber);
+
+  const entryLabel = document.createElement('span');
+  entryLabel.className = 'lc';
+  entryLabel.textContent = entry.title;
+  entryLabel.style.flex = '1';
+
+  const openButton = document.createElement('button');
+  openButton.type = 'button';
+  openButton.textContent = '>';
+  openButton.className = 'button-secondary button-inline';
+  openButton.title = `open note ${entry.title}`;
+  openButton.setAttribute('aria-label', `open note ${entry.title}`);
+  openButton.addEventListener('click', (event) => {
+    event.stopPropagation();
+    openEntryWindow(entry, win, project);
+  });
+
+  makeInteractiveLine(entryRow, () => openEntryWindow(entry, win, project));
+  entryRow.append(lineNum, entryLabel, openButton);
+  return entryRow;
+}
+
+async function refreshProjectEntries(projectId) {
+  const win = getDJWindow(`project:${projectId}`);
+  if (!win || win.isDestroyed) return;
+  const linesBox = win.bodyEl.querySelector('.numbered-lines');
+  if (!linesBox) {
+    if (win.projectContentRenderCount) {
+      const kinds = pendingDataChanges.get(projectId) ?? new Set();
+      kinds.add('note');
+      pendingDataChanges.set(projectId, kinds);
+    }
+    return;
+  }
+
+  const [entries, project] = await Promise.all([
+    window.journal.listEntries(projectId),
+    window.journal.getProject(projectId),
+  ]);
+  if (win.isDestroyed) return;
+  if (win.projectContentRenderCount) {
+    const kinds = pendingDataChanges.get(projectId) ?? new Set();
+    kinds.add('note');
+    pendingDataChanges.set(projectId, kinds);
+    return;
+  }
+  if (!linesBox.isConnected) {
+    queueProjectDataRefresh({ projectId, kind: 'note' });
+    return;
+  }
+
+  const scrollTop = win.bodyEl.scrollTop;
+  const rows = [...linesBox.children];
+  const notesHeading = rows.find((row) => row.classList.contains('section-heading') && row.textContent.trim() === '[ NOTES ]');
+  if (!notesHeading) return;
+  const nextHeading = rows.slice(rows.indexOf(notesHeading) + 1)
+    .find((row) => row.classList.contains('section-heading')) ?? null;
+  let row = notesHeading.nextElementSibling;
+  while (row && row !== nextHeading) {
+    const next = row.nextElementSibling;
+    row.remove();
+    row = next;
+  }
+
+  let insertionPoint = nextHeading;
+  if (entries.length === 0) {
+    linesBox.insertBefore(makeLine(null, 'no notes yet', 'dim'), insertionPoint);
+  } else {
+    for (const [index, entry] of entries.slice(0, 6).reverse().entries()) {
+      linesBox.insertBefore(createProjectEntryRow(entry, project ?? { id: projectId }, win, index + 1), insertionPoint);
+    }
+  }
+
+  const noteCount = rows.find((item) => item.classList.contains('txt-line') && item.textContent.trim().startsWith('notes:'));
+  if (noteCount) noteCount.querySelector('.lc').textContent = `notes: ${entries.length}`;
+  win.bodyEl.scrollTop = scrollTop;
+}
+
+const pendingDataChanges = new Map();
+const dataChangeTimers = new Map();
+const refreshingProjects = new Set();
+
+function queueProjectDataRefresh(change) {
+  if (!change?.projectId) return;
+  const kinds = pendingDataChanges.get(change.projectId) ?? new Set();
+  kinds.add(change.kind);
+  pendingDataChanges.set(change.projectId, kinds);
+  clearTimeout(dataChangeTimers.get(change.projectId));
+  dataChangeTimers.set(change.projectId, setTimeout(() => flushProjectDataChanges(change.projectId), 40));
+}
+
+async function flushProjectDataChanges(projectId) {
+  dataChangeTimers.delete(projectId);
+  if (refreshingProjects.has(projectId)) return;
+  const kinds = pendingDataChanges.get(projectId);
+  if (!kinds?.size) return;
+  const win = getDJWindow(`project:${projectId}`);
+  if (win?.projectContentRenderCount) return;
+  pendingDataChanges.delete(projectId);
+  refreshingProjects.add(projectId);
+  try {
+    if (kinds.size === 1 && kinds.has('note')) {
+      await refreshProjectEntries(projectId);
+    } else {
+      const win = getDJWindow(`project:${projectId}`);
+      if (win && !win.isDestroyed) {
+        await renderProjectWindowContent(win, { id: projectId }, true);
+      }
+    }
+  } catch (error) {
+    console.error('failed to refresh EDI after an external data change', error);
+  } finally {
+    refreshingProjects.delete(projectId);
+    if (pendingDataChanges.get(projectId)?.size) {
+      dataChangeTimers.set(projectId, setTimeout(() => flushProjectDataChanges(projectId), 0));
+    }
+  }
+}
+
+async function renderProjectWindowContent(win, project, preserveState = false) {
+  win.projectContentRenderCount = (win.projectContentRenderCount ?? 0) + 1;
+  try {
+    await renderProjectWindowContentImpl(win, project, preserveState);
+  } finally {
+    win.projectContentRenderCount -= 1;
+    if (win.projectContentRenderCount === 0 && pendingDataChanges.get(project.id)?.size) {
+      clearTimeout(dataChangeTimers.get(project.id));
+      dataChangeTimers.set(project.id, setTimeout(() => flushProjectDataChanges(project.id), 0));
+    }
+  }
+}
+
+async function renderProjectWindowContentImpl(win, project, preserveState) {
   const container = document.createElement('div');
   const linesBox = document.createElement('div');
   linesBox.className = 'txt-lines numbered-lines';
   container.appendChild(linesBox);
 
-  project = (await window.journal.getProject(project.id)) ?? project;
+  const freshProject = await window.journal.getProject(project.id);
+  if (!freshProject) return;
+  project = freshProject;
   const [entries, commits, checkpoints, research, experiments, decisions, assumptions, insights, resume] = await Promise.all([
     window.journal.listEntries(project.id),
     window.journal.getCommits(project.id),
@@ -1868,7 +2008,29 @@ async function renderProjectWindowContent(win, project) {
   status.textContent = '';
 
   form.appendChild(status);
+  const previousBody = win.bodyEl;
+  const savedState = preserveState ? {
+    scrollTop: previousBody.scrollTop,
+    focusedId: previousBody.contains(document.activeElement) ? document.activeElement.id : '',
+    fields: [...previousBody.querySelectorAll('input[id], textarea[id], select[id]')]
+      .map((field) => [field.id, field.type === 'checkbox'
+        ? field.checked
+        : field.multiple
+          ? [...field.selectedOptions].map((option) => option.value)
+          : field.value]),
+  } : null;
   win.setContent(container);
+  if (savedState) {
+    for (const [id, value] of savedState.fields) {
+      const field = win.bodyEl.querySelector(`#${CSS.escape(id)}`);
+      if (!field) continue;
+      if (field.type === 'checkbox') field.checked = value;
+      else if (field.multiple) for (const option of field.options) option.selected = value.includes(option.value);
+      else field.value = value;
+    }
+    win.bodyEl.scrollTop = savedState.scrollTop;
+    if (savedState.focusedId) win.bodyEl.querySelector(`#${CSS.escape(savedState.focusedId)}`)?.focus({ preventScroll: true });
+  }
   keepVisualLineNumbers(win, linesBox);
 
   const refreshButton = toolbar.querySelector('#refresh-git-btn');
@@ -1921,6 +2083,7 @@ async function renderProjectWindowContent(win, project) {
         tags: form.querySelector('#new-entry-tags').value.split(','),
         commitHashes: form.querySelector('#new-entry-commits').value.split(','),
       });
+      queueProjectDataRefresh({ projectId: project.id, kind: 'note' });
       titleInput.value = '';
       for (const [, inputId] of fieldIds) form.querySelector(inputId).value = '';
       form.querySelector('#new-entry-tags').value = '';
@@ -2134,3 +2297,7 @@ async function drainIntegrationRequest() {
 }
 
 window.journal.onIntegrationRequest(drainIntegrationRequest).then(drainIntegrationRequest);
+window.journal.onDataChanged(queueProjectDataRefresh)
+  .then(() => window.journal.takeDataChanges())
+  .then((changes) => changes.forEach(queueProjectDataRefresh))
+  .catch((error) => console.error('failed to subscribe to EDI data changes', error));

@@ -492,6 +492,7 @@ fn handle_entry_create(
     database: &Arc<Mutex<Option<Connection>>>,
     database_error: &Option<String>,
     pending: &Arc<Mutex<Option<Value>>>,
+    data_changes: &Arc<Mutex<Vec<Value>>>,
     envelope: &RequestEnvelope,
 ) -> Result<Value, (String, String, bool, u16)> {
     let guard = database.lock().map_err(|_| {
@@ -534,8 +535,24 @@ fn handle_entry_create(
     })?;
     let result = create_integration_entry(db, envelope, project_id)
         .map_err(|message| ("INVALID_REQUEST".into(), message, false, 400))?;
+    let project_id = project_id.to_string();
     drop(guard);
-    queue_integration_ui(app, pending, envelope, Some(project), false)?;
+    if result.get("created").and_then(Value::as_bool) == Some(true) {
+        let change = json!({
+            "projectId": project_id,
+            "kind": result["entryType"],
+            "id": result["entryId"],
+            "operation": "create",
+        });
+        if let Ok(mut changes) = data_changes.lock() {
+            changes.push(change.clone());
+            if changes.len() > 100 {
+                let excess = changes.len() - 100;
+                changes.drain(..excess);
+            }
+        }
+        let _ = app.emit("edi-data-changed", change);
+    }
     Ok(result)
 }
 
@@ -545,6 +562,7 @@ fn handle_request(
     database: &Arc<Mutex<Option<Connection>>>,
     database_error: &Option<String>,
     pending: &Arc<Mutex<Option<Value>>>,
+    data_changes: &Arc<Mutex<Vec<Value>>>,
     token: &str,
     instance_id: &str,
 ) {
@@ -668,7 +686,7 @@ fn handle_request(
 
     let result = match envelope.action.as_str() {
         "project.open" => handle_project_open(app, database, database_error, pending, &envelope),
-        "entry.create" => handle_entry_create(app, database, database_error, pending, &envelope),
+        "entry.create" => handle_entry_create(app, database, database_error, pending, data_changes, &envelope),
         _ => Err((
             "ACTION_NOT_SUPPORTED".into(),
             "This action is not supported by EDI.".into(),
@@ -698,6 +716,7 @@ pub(crate) fn start(
     database: Arc<Mutex<Option<Connection>>>,
     database_error: Option<String>,
     pending: Arc<Mutex<Option<Value>>>,
+    data_changes: Arc<Mutex<Vec<Value>>>,
 ) -> Result<IntegrationRuntime, String> {
     let directory = integration_directory()?;
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
@@ -728,6 +747,7 @@ pub(crate) fn start(
                     &database,
                     &database_error,
                     &pending,
+                    &data_changes,
                     &token,
                     &instance_id,
                 );

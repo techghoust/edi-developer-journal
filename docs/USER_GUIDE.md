@@ -1,6 +1,6 @@
 # EDI DEVELOPER JOURNAL: USER GUIDE
 
-this guide explains the current behavior of version `0.3.0`
+this guide explains the current behavior of version `0.4.0`
 
 ---
 
@@ -10,7 +10,7 @@ download the packages from the [latest GitHub release](https://github.com/techgh
 
 ### Windows
 
-download the file ending in `_x64-setup.exe`, run it and open `EDI Developer Journal` from the Start menu
+download `_x64-portable.exe` from the latest release and open it. EDI runs without installation
 
 ### Linux
 
@@ -33,6 +33,12 @@ sudo apt install ./EDI*.deb
 ```
 
 the Linux application requires WebKitGTK 4.1. Git must be installed for repository integration
+
+### macOS
+
+download the portable zip for Apple Silicon or Intel, extract it and open `EDI Developer Journal.app`. the app bundle runs from the extracted folder and does not require installation
+
+macOS builds are not signed or notarized, so Gatekeeper may show a warning on first launch
 
 on first launch the project list is empty. release packages do not include example projects or another user's journal data
 
@@ -254,6 +260,12 @@ shows the current cached Git state and refreshes it on request
 ### delete project
 
 removes the project and its journal memory from EDI. repository files remain on disk
+
+## INTEGRATION API
+
+the Integration API lets local tools create journal entries without opening the database directly. EDI keeps SQLite access inside the application
+
+after a successful API write, an already-open EDI window updates automatically. the current project view stays open, and retried requests do not create duplicate entries. failed requests are not shown as completed changes
 
 ---
 

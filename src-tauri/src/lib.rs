@@ -12,6 +12,7 @@ struct AppState {
     db: Arc<Mutex<Option<Connection>>>,
     db_error: Option<String>,
     integration_pending: Arc<Mutex<Option<Value>>>,
+    integration_changes: Arc<Mutex<Vec<Value>>>,
 }
 
 fn text(input: &Value, key: &str) -> String {
@@ -302,6 +303,7 @@ pub(crate) fn resolve_integration_project(db: &Connection, reference: &integrati
 }
 #[tauri::command] fn get_app_status(state: State<AppState>) -> Value { json!({"dbReady":state.db.lock().map(|v|v.is_some()).unwrap_or(false),"dbError":state.db_error}) }
 #[tauri::command] fn take_integration_request(state: State<AppState>) -> Option<Value> { state.integration_pending.lock().ok()?.take() }
+#[tauri::command] fn take_integration_data_changes(state: State<AppState>) -> Vec<Value> { state.integration_changes.lock().map(|mut changes| std::mem::take(&mut *changes)).unwrap_or_default() }
 
 #[tauri::command] fn list_projects(state: State<AppState>) -> Result<Vec<Value>,String> { with_db(&state, |db| {
     let mut statement=db.prepare("SELECT id FROM projects ORDER BY created_at DESC,rowid DESC").map_err(|e|e.to_string())?;
@@ -1083,24 +1085,26 @@ pub fn run() {
     let (db, db_error) = match result { Ok(db) => (Some(db), None), Err(error) => (None, Some(error)) };
     let database = Arc::new(Mutex::new(db));
     let integration_pending = Arc::new(Mutex::new(None));
+    let integration_changes = Arc::new(Mutex::new(Vec::new()));
     let integration_database = Arc::clone(&database);
     let integration_queue = Arc::clone(&integration_pending);
+    let integration_change_queue = Arc::clone(&integration_changes);
     let integration_database_error = db_error.clone();
 
     tauri::Builder::default()
-        .manage(AppState { db: database, db_error, integration_pending })
+        .manage(AppState { db: database, db_error, integration_pending, integration_changes })
         .setup(move |app| {
             if let Some(window) = app.get_webview_window("main") {
                 let icon = tauri::image::Image::new(include_bytes!("../icons/128x128.rgba"), 128, 128);
                 window.set_icon(icon)?;
             }
-            match integration::start(app.handle().clone(), Arc::clone(&integration_database), integration_database_error.clone(), Arc::clone(&integration_queue)) {
+            match integration::start(app.handle().clone(), Arc::clone(&integration_database), integration_database_error.clone(), Arc::clone(&integration_queue), Arc::clone(&integration_change_queue)) {
                 Ok(runtime) => { app.manage(runtime); }
                 Err(error) => eprintln!("EDI local integration unavailable: {error}"),
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_app_status,take_integration_request,list_projects,auto_relocate_projects,get_project,update_project_name,delete_project,create_project,open_project_path,relocate_project,choose_project_path,choose_media_file,open_media_location,get_data_directory,export_project_data,import_project_data,list_entries,create_entry,update_entry,delete_entry,list_checkpoints,create_checkpoint,delete_checkpoint,list_decisions,create_decision,update_decision,delete_decision,list_assumptions,create_assumption,update_assumption,list_experiments,create_experiment,update_experiment,delete_experiment,get_edi_insights,get_why_context,get_resume_context,list_memory_timeline,list_research,create_research_item,delete_research_item,refresh_git_metadata,get_commits,analyze_project_xray,simulate_xray_removal,set_xray_memory_links])
+        .invoke_handler(tauri::generate_handler![get_app_status,take_integration_request,take_integration_data_changes,list_projects,auto_relocate_projects,get_project,update_project_name,delete_project,create_project,open_project_path,relocate_project,choose_project_path,choose_media_file,open_media_location,get_data_directory,export_project_data,import_project_data,list_entries,create_entry,update_entry,delete_entry,list_checkpoints,create_checkpoint,delete_checkpoint,list_decisions,create_decision,update_decision,delete_decision,list_assumptions,create_assumption,update_assumption,list_experiments,create_experiment,update_experiment,delete_experiment,get_edi_insights,get_why_context,get_resume_context,list_memory_timeline,list_research,create_research_item,delete_research_item,refresh_git_metadata,get_commits,analyze_project_xray,simulate_xray_removal,set_xray_memory_links])
         .run(tauri::generate_context!())
         .expect("error while running EDI Developer Journal");
 }

@@ -76,10 +76,46 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
+  macos-portable:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            architecture: x64
+          - runner: macos-latest
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - run: npm ci
+      - run: npm run build
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+      - run: npm run release:macos
+      - name: package portable app
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          version="${GITHUB_REF_NAME#v}"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "src-tauri/target/release/bundle/macos/EDI Developer Journal.app" \
+            "release-assets/EDI.Developer.Journal_${version}_${{ matrix.architecture }}-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.architecture }}-portable
+          path: release-assets/*-portable.zip
+          if-no-files-found: error
+
   publish:
     needs:
       - windows-installer
       - linux-packages
+      - macos-portable
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

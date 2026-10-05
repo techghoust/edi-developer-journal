@@ -61,5 +61,12 @@
     getAppStatus: () => invoke('get_app_status'),
     takeIntegrationRequest: () => invoke('take_integration_request'),
     onIntegrationRequest: (handler) => listen('edi-integration-request', () => handler()),
+    onDataChanged: (handler) => listen('edi-data-changed', (event) => {
+      handler(event.payload);
+      invoke('take_integration_data_changes').catch((error) => {
+        console.error('failed to acknowledge EDI data change', error);
+      });
+    }),
+    takeDataChanges: () => invoke('take_integration_data_changes'),
   };
 })();

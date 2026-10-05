@@ -2,7 +2,7 @@
 
 local-first desktop journal that stores the reasoning behind software projects: decisions, experiments, research, assumptions, failures and the context needed to continue the work later
 
-current version: `0.3.0`
+current version: `0.4.0`
 
 ![EDI Developer Journal workspace](assets/edi-preview.jpg)
 
@@ -136,6 +136,8 @@ the companion communicates only through `127.0.0.1`. it does not access the EDI 
 
 see the companion repository for its VSIX and installation guide: [techghoust/edi-vscode](https://github.com/techghoust/edi-vscode)
 
+successful writes through the Integration API appear in an open EDI window automatically. retried requests do not add duplicate entries
+
 ---
 
 ## X-RAY
@@ -156,28 +158,38 @@ X-Ray currently supports npm dependency analysis. projects from other ecosystems
 
 ---
 
-## INSTALL ON WINDOWS
+## RUN WITHOUT INSTALLING
 
-1. open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest);
-2. choose one Windows build;
-3. run the application
+portable builds are available for Windows, Linux and macOS. they run from the downloaded file or extracted application bundle and do not add EDI to the system's installed apps
 
-available builds:
+### Windows
 
-- `_x64-setup.exe` installs EDI and adds it to the Start menu;
-- `_x64-portable.exe` runs without installation
+download `_x64-portable.exe` and run it
 
-the installer contains the application. Node.js, Rust and the source code are not required to use it
+### Linux
 
-the current release is unsigned, so Windows SmartScreen may show a warning. download releases only from this repository
+download the `.AppImage`, make it executable and run it:
+
+```bash
+chmod +x EDI*.AppImage
+./EDI*.AppImage
+```
+
+the Linux build targets x86_64 and requires WebKitGTK 4.1. Git must be available for repository integration
+
+### macOS
+
+download the portable `.zip` for the Mac processor, extract it and open `EDI Developer Journal.app`. the release includes Apple Silicon and Intel builds
+
+macOS packages are not signed or notarized. Gatekeeper may show a warning when the app is first opened
 
 on first launch the project list is empty. EDI does not include example projects, developer data or another user's journal
 
 ---
 
-## INSTALL ON LINUX
+## LINUX INSTALLER
 
-open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest) and choose one package:
+open the [latest GitHub release](https://github.com/techghoust/edi-developer-journal/releases/latest) and choose a package:
 
 - `.AppImage` runs without installation. make it executable and open it;
 - `.deb` installs on Debian, Ubuntu and compatible distributions
@@ -187,7 +199,7 @@ chmod +x EDI*.AppImage
 ./EDI*.AppImage
 ```
 
-the Linux build targets x86_64 systems and requires WebKitGTK 4.1. Git must be available for repository integration
+the `.deb` package installs EDI on Debian, Ubuntu and compatible distributions. the Linux build targets x86_64 systems and requires WebKitGTK 4.1. Git must be available for repository integration
 
 ---
 
@@ -234,13 +246,13 @@ npm start
 npm run build:tauri
 ```
 
-release files are written under:
+on Windows, release files are written under:
 
 ```text
 src-tauri/target/release/bundle/nsis
 ```
 
-tagged versions are built as Windows installers by GitHub Actions and attached to the matching GitHub Release
+tagged versions build a Windows portable executable, Linux AppImage and Debian package, and portable macOS app bundles for Intel and Apple Silicon. GitHub Actions attaches these files to the matching GitHub Release
 
 ---
 
@@ -256,7 +268,7 @@ local media files are not embedded in JSON. copy the application data directory 
 
 ## DATA AND PRIVACY
 
-on a fresh Windows installation, EDI stores its database and managed attachments in:
+on Windows, EDI stores its database and managed attachments in:
 
 ```text
 %APPDATA%\EDI Developer Journal
@@ -302,7 +314,6 @@ npm run typecheck
 npm test
 npm run build
 npm run build:tauri
-npm run release:windows
 ```
 
 if `better-sqlite3` must compile locally, Node.js also needs Python and the Visual Studio C++ toolchain
@@ -335,7 +346,7 @@ TypeScript tests are built with Vitest. the native application uses Rust unit te
 
 ## CURRENT LIMITATIONS
 
-- Windows and x86_64 Linux are the current desktop targets;
+- release builds target Windows, x86_64 Linux, and macOS for Intel and Apple Silicon;
 - X-Ray analyzes npm projects only;
 - JSON exports do not contain local media files;
 - imported memory is merged into an existing project;

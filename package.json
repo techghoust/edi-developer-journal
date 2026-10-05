@@ -1,7 +1,7 @@
 {
   "name": "edi-developer-journal",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "workspaces": [
     "packages/*",
     "apps/*"
@@ -19,7 +19,8 @@
     "start:tauri": "tauri dev",
     "build:tauri": "tauri build",
     "release:windows": "tauri build --bundles nsis",
-    "release:linux": "tauri build --bundles deb,appimage"
+    "release:linux": "tauri build --bundles deb,appimage",
+    "release:macos": "tauri build --bundles app"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.8.4",
