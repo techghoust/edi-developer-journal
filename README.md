@@ -134,7 +134,7 @@ it can:
 
 the companion communicates only through `127.0.0.1`. it does not access the EDI database directly, scan the repository or send data to a cloud service
 
-see the companion repository for its VSIX and installation guide: [techghoust/edi-vscode](https://github.com/techghoust/edi-vscode)
+see the companion repository for its VSIX and installation guide: [techghoust/edi-companions](https://github.com/techghoust/edi-companions)
 
 successful writes through the Integration API appear in an open EDI window automatically. retried requests do not add duplicate entries
 
